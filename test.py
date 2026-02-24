@@ -9,7 +9,7 @@ from aero_logic import AeroLogic
 from elevator_manager import ElevatorManager
 
 USE_RANDOM_WIND = False  # Set to True for stochastic wind
-DT = 0.005                # Time step (seconds)
+DT = 0.005               # Time step (seconds)
 
 # --- Mock Hardware ---
 class MockMotor:
