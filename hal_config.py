@@ -1,4 +1,3 @@
-"""
 Module: Hardware Abstraction Layer Config
 Author: He
 Original Ref: pinmap.cpp
@@ -7,10 +6,11 @@ Description:
     Maps physical GPIO pins to logical objects (e.g., Motor Enable, 
     Limit Switches, SPI Chip Selects) and initializes the GPIO modes.
 """
-import RPi.GPIO as GPIO
-import time
+from gpiozero import DigitalOutputDevice, Button, PWMOutputDevice
+from signal import pause
+
 PINS = {
-    #Elevator
+    # Elevator
     "ELEVATOR_CS":    1,   
     "ELEVATOR_STEP":  2,   
     "ELEVATOR_DIR":   3,   
@@ -18,45 +18,41 @@ PINS = {
     "ELEVATOR_RESET": 10,  
     "E_BRAKE":        6,   
 
-    #Limit switch
+    # Limit switch
     "LIM_LOWER_1":    15,  
     "LIM_LOWER_2":    16,  
     "LIM_UPPER_1":    20, 
     "LIM_UPPER_2":    21,  
     
-    #Yaw Control
+    # Yaw Control
     "YAW_EN":         22,  
     "CCW_PWM":        12,  
     "CW_PWM":         13, 
     "DEBUG_LED":      25, 
 }
 
+devices = {}
+
 def setup_gpio():
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setwarnings(False)
-
-    # Out pins
-    out_pins = [
-        PINS["ELEVATOR_CS"], PINS["ELEVATOR_STEP"], PINS["ELEVATOR_DIR"],
-        PINS["ELEVATOR_EN"], PINS["ELEVATOR_RESET"], PINS["E_BRAKE"],
-        PINS["YAW_EN"], PINS["DEBUG_LED"]
+    # DigitalOutputDevice
+    # initial_value=False
+    out_pin_names = [
+        "ELEVATOR_CS", "ELEVATOR_STEP", "ELEVATOR_DIR",
+        "ELEVATOR_EN", "ELEVATOR_RESET", "E_BRAKE",
+        "YAW_EN", "DEBUG_LED"
     ]
-    GPIO.setup(out_pins, GPIO.OUT, initial=GPIO.LOW)
+    for name in out_pin_names:
+        devices[name] = DigitalOutputDevice(PINS[name], initial_value=False)
 
-    # In pins
-    in_pins = [
-        PINS["LIM_LOWER_1"], PINS["LIM_LOWER_2"], 
-        PINS["LIM_UPPER_1"], PINS["LIM_UPPER_2"]
-    ]
-    GPIO.setup(in_pins, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    # Button
+    # pull_up=True
+    in_pin_names = ["LIM_LOWER_1", "LIM_LOWER_2", "LIM_UPPER_1", "LIM_UPPER_2"]
+    for name in in_pin_names:
+        devices[name] = Button(PINS[name], pull_up=True)
 
-    #Set pwm
-    global ccw_pwm_ctrl
-    GPIO.setup(PINS["CCW_PWM"], GPIO.OUT)
-    ccw_pwm_ctrl = GPIO.PWM(PINS["CCW_PWM"], 1000) 
-    ccw_pwm_ctrl.start(0)
+    # Initialize PWM (PWMOutputDevice)
+    devices["CCW_PWM"] = PWMOutputDevice(PINS["CCW_PWM"], frequency=1000, initial_value=0)
 
 def cleanup():
-    if 'ccw_pwm_ctrl' in globals():
-        ccw_pwm_ctrl.stop()
-    GPIO.cleanup()
+    for device in devices.values():
+        device.close()
