@@ -82,3 +82,16 @@ class ElevatorManager:
         self.ls_top.is_pressed = True 
         self.ls_bottom.is_pressed = False
         self.motor.stop()
+
+
+    def update_position(self, should_be_active, current_fin_angle):
+        if should_be_active:
+            if not self.is_fully_deployed:
+                self._move_to_top()
+        else:
+            if abs(current_fin_angle) < 0.5:
+                if not self.is_fully_stowed:
+                    self._move_to_bottom()
+            else:
+                print(f"Elevator Safety: Waiting for fin to zero (Current: {current_fin_angle:.2f}°)")
+                self.motor.stop()
