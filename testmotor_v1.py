@@ -1,6 +1,7 @@
 import time
 from hal_v1 import Motor
-
+from amt22_encoder import AMT22Encoder
+from aero_logic import AeroLogic
 
 # ==========================
 # DEBUG
@@ -20,6 +21,7 @@ print("=== INIT ===")
 motor = Motor()
 motor.set_motor_speed(0, 0)
 motor.set_yaw(0)
+encoder=AMT22Encoder()
 time.sleep(1)
 
 print_status(motor)
@@ -59,6 +61,25 @@ try:
         print(f"CCW speed: {speed}")
         motor.set_yaw(speed)
         time.sleep(1)
+
+    aero= AeroLogic()
+    dis=[]
+    range= range(aero.wind_speeds)
+    for test_speed in [0, 3, 8, 15, 20, 24, 30, 35, 41] :
+        for i in range:
+            dis[i]= abs(test_speed[i]-aero.wind_speeds[i])
+        for i in range:
+            if dis[i] == min(dis):
+                test_speed = aero.wind_speeds[i]
+        target = aero.get_target_angle(test_speed)
+        position = 0
+        while position != 100:
+            motor.set_yaw(100)
+            position=encoder.get_position() 
+            if position == target:
+                print("Position reached")
+            time.sleep(1)
+            break
 
     print("Stop yaw")
     motor.set_yaw(0)
