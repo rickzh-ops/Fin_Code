@@ -1,5 +1,5 @@
 import time
-from hal_v1 import Motor
+from hal_plus_motordriver import Motor
 from amt22_encoder import AMT22Encoder
 from aero_logic import AeroLogic
 
