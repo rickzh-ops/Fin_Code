@@ -36,7 +36,8 @@ steps = int(TOTAL_TIME / DT)
 times = np.linspace(0, TOTAL_TIME, steps)
 
 # Continuously varying wind: Sine wave simulates wind fluctuation
-base_wind = 25 + 15 * np.sin(0.15 * times)
+base_wind = 35 * np.sin(0.15 * times)
+# base_wind = -25*times/times
 wind_profile = np.where(times < 5, 0, base_wind)
 
 # Initial state
@@ -50,7 +51,8 @@ history = {"wind":[], "target_lut":[], "actual_angle":[], "state":[]}
 for i in range(steps):
     wind_speed = wind_profile[i]
     # Wind operational range: 5.0 < wind < 35.0
-    should_be_active = 5.0 < wind_speed < 35.0
+    #should_be_active = (5.0 < wind_speed < 35.0) or (-35 < wind_speed < -5) 
+    should_be_active = 5.0 < abs(wind_speed) < 35.0
     
     # 1. State machine logic (including safety interlock)
     if should_be_active:
@@ -132,6 +134,9 @@ fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
 # Plot 1: Wind speed
 ax1.plot(times, history["wind"], label='Wind Speed (m/s)', color='tab:blue')
 ax1.axhline(35, color='r', linestyle='--', label='Cut-off (35m/s)')
+ax1.axhline(-35,  color='r', linestyle='--', label='Cut-off (-35m/s)')
+# ax1.axhline(5, color='b', linestyle='--', label='Cut-off (5m/s)')
+# ax1.axhline(-5,  color='b', linestyle='--', label='Cut-off (-5m/s)')
 ax1.set_ylabel("Wind Speed")
 ax1.grid(True, alpha=0.3)
 ax1.legend()

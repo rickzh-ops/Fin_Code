@@ -18,8 +18,8 @@ class AeroLogic:
         """
         # --- Example Lookup Table Data ---
         # Replace these with your actual experimental data points
-        self.wind_speeds = [0, 5, 10, 15, 20, 25, 30, 35, 40]  # m/s
-        self.target_angles = [0, 2, 5, 9, 14, 18, 21, 23, 25]  # degrees
+        self.wind_speeds =   [-40, -35, -30, -25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25, 30, 35, 40]  # m/s
+        self.target_angles = [-25,-23,-21,-18,-14,-9,-5,-2,0, 2, 5, 9, 14, 18, 21, 23, 25]  # degrees
         # ---------------------------------
 
     def get_target_angle(self, measured_wind_speed):
@@ -38,9 +38,9 @@ class AeroLogic:
         
         return float(target_angle)
 
-# --- Quick Test ---
-if __name__ == "__main__":
-    aero = AeroLogic()
-    test_speed = 12.5  # Example wind speed from CAN
-    target = aero.get_target_angle(test_speed)
-    print(f"Wind Speed: {test_speed} m/s -> Target Angle: {target:.2f} deg")
+# # --- Quick Test ---
+# if __name__ == "__main__":
+#     aero = AeroLogic()
+#     test_speed = 12.5  # Example wind speed from CAN
+#     target = aero.get_target_angle(test_speed)
+#     print(f"Wind Speed: {test_speed} m/s -> Target Angle: {target:.2f} deg")
