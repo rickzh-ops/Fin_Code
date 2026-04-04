@@ -1,6 +1,6 @@
 import time
 from hal_plus_motordriver import Motor
-from amt22_encoder import AMT22Encoder
+# from amt22_encoder import AMT22Encoder
 from aero_logic import AeroLogic
 
 # ==========================
@@ -21,7 +21,7 @@ print("=== INIT ===")
 motor = Motor()
 motor.set_motor_speed(0, 0)
 motor.set_yaw(0)
-encoder=AMT22Encoder()
+# encoder=AMT22Encoder()
 time.sleep(1)
 
 print_status(motor)
@@ -31,8 +31,9 @@ try:
     # ==========================
     # MOTOR TEST
     # ==========================
+    '''
     print("=== MOTOR TEST ===")
-
+    
     for speed in [100, 200, 300]:
         print(f"Forward speed: {speed}")
         motor.set_motor_speed(speed, speed)
@@ -46,22 +47,20 @@ try:
     print("Stop motors")
     motor.set_motor_speed(0, 0)
     time.sleep(1)
-
     # ==========================
     # YAW TEST
     # ==========================
     print("=== YAW TEST ===")
 
-    for speed in [100, 200, 300]:
+    for speed in [1, 2, 3]:
         print(f"CW speed: {speed}")
         motor.set_yaw(speed)
-        time.sleep(1)
+        time.sleep(10)
 
-    for speed in [-100, -200, -300]:
+    for speed in [-1, -2, -3]:
         print(f"CCW speed: {speed}")
         motor.set_yaw(speed)
-        time.sleep(1)
-
+        time.sleep(10)
     aero= AeroLogic()
     dis=[]
     range= range(aero.wind_speeds)
@@ -80,7 +79,6 @@ try:
                 print("Position reached")
             time.sleep(1)
             break
-
     print("Stop yaw")
     motor.set_yaw(0)
     time.sleep(1)
@@ -89,7 +87,6 @@ try:
     # STEPPER TEST
     # ==========================
     print("=== ELEVATOR TEST ===")
-
     print("Move UP")
     motor.move_elevator(100, direction=1, delay=0.002)
     time.sleep(1)
@@ -97,7 +94,7 @@ try:
     print("Move DOWN")
     motor.move_elevator(100, direction=0, delay=0.002)
     time.sleep(1)
-
+    '''
     # ==========================
     # LIMIT SWITCH TEST
     # ==========================
@@ -109,7 +106,6 @@ try:
             "UPPER:", motor.get_upper_limit()
         )
         time.sleep(0.5)
-
 
 except KeyboardInterrupt:
     print("\nStopped by user")

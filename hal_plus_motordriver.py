@@ -60,6 +60,7 @@ class Motor:
     # =========================
     # Motor Control
     # =========================
+    
     def set_motor_speed(self, m1, m2):
         self._set_single_motor("M1", m1)
         self._set_single_motor("M2", m2)
@@ -77,7 +78,7 @@ class Motor:
         self.pi.write(self.PINS[f"{prefix}_DIR"], direction)
         duty = int(speed * 6250 / 3)
         self.pi.hardware_PWM(self.PINS[f"{prefix}_PWM"], 20000, duty)
-
+    
     # =========================
     # Yaw Control
     # =========================
@@ -99,7 +100,6 @@ class Motor:
         else:
             self.pi.hardware_PWM(self.PINS["YAW_PWM_CW"], 20000, 0)
             self.pi.hardware_PWM(self.PINS["YAW_PWM_CCW"], 20000, duty)
-
     # =========================
     # Elevator Motor
     # =========================
@@ -124,11 +124,14 @@ class Motor:
             time.sleep(delay)
 
     def get_lower_limit(self):
+        self.pi.set_mode(self.PINS["LIM_LOWER"], pigpio.INPUT)
+        self.pi.set_pull_up_down(self.PINS["LIM_LOWER"], pigpio.PUD_UP)
         return self.pi.read(self.PINS["LIM_LOWER"])
 
     def get_upper_limit(self):
+        self.pi.set_mode(self.PINS["LIM_UPPER"], pigpio.INPUT)
+        self.pi.set_pull_up_down(self.PINS["LIM_UPPER"], pigpio.PUD_UP)
         return self.pi.read(self.PINS["LIM_UPPER"])
-
     # =========================
     # Stop
     # =========================
