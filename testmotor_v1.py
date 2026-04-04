@@ -43,10 +43,23 @@ try:
         print(f"Reverse speed: {speed}")
         motor.set_motor_speed(speed, speed)
         time.sleep(1)
-
+    '''
+    print("=== MOTOR + LIMITSWITCH TEST ===")
+    time.sleep(1)
+    while True:
+        Lower = motor.get_lower_limit()
+        if Lower==1:
+            motor.set_motor_speed(100,100)
+            time.sleep(0.1)
+        else:
+            motor.set_motor_speed(0,0)
+            time.sleep(1)
+            print("Limit switch reached")
+            break
     print("Stop motors")
     motor.set_motor_speed(0, 0)
     time.sleep(1)
+    '''
     # ==========================
     # YAW TEST
     # ==========================
@@ -98,6 +111,7 @@ try:
     # ==========================
     # LIMIT SWITCH TEST
     # ==========================
+    '''
     print("=== LIMIT SWITCH TEST ===")
 
     for _ in range(10):
@@ -106,7 +120,7 @@ try:
             "UPPER:", motor.get_upper_limit()
         )
         time.sleep(0.5)
-
+    '''
 except KeyboardInterrupt:
     print("\nStopped by user")
 
