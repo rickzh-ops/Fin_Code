@@ -1,6 +1,7 @@
 import spidev
 import time
-from hal import devices
+import RPi.GPIO as GPIO
+from hal_plus_motordriver import Motor
 
 
 class AMT22Encoder:
@@ -8,27 +9,36 @@ class AMT22Encoder:
     AMT22_RESET = 0x60
     AMT22_ZERO = 0x70
 
-    def __init__(self, bus=0, device=0, speed_hz=1000000):
+    def __init__(self, pi_instance, cs_pin, bus=0, device=0, speed_hz=1000000):
+        self.pi = pi_instance
+        self.cs_pin = cs_pin
+        GPIO.setmode(GPIO.BCM)
+        # 初始化 SPI
         self.spi = spidev.SpiDev()
         self.spi.open(bus, device)
-        self.spi.no_cs = True 
+        self.spi.no_cs = True # 我们使用 pigpio 手动控制 CS
         self.spi.max_speed_hz = speed_hz
         self.spi.mode = 0
-
+        self.spi.bits_per_word = 8
+        # 确保 CS 初始为高电平
         self._cs_high()
 
     def _cs_low(self):
-        devices["ELEVATOR_CS"].off()
+        self.pi.write(self.cs_pin, 0)
+        time.sleep(0.000003) # 确保建立时间 (3us)
 
     def _cs_high(self):
-        devices["ELEVATOR_CS"].on()
+        self.pi.write(self.cs_pin, 1)
+        time.sleep(0.000003) # 确保保持时间
 
     def send_cmd(self, cmd):
         try:
-            self._cs_low()
-            resp = self.spi.xfer2([self.AMT22_NOP, cmd])
-            self._cs_high()
-            return (resp[0] << 8) | resp[1]
+            GPIO.output(self.cs_pin, GPIO.LOW)
+            time.sleep(0.00001)
+            rx = self.spi.xfer2([0x00, 0x00])
+            time.sleep(0.00001)
+            GPIO.output(self.cs_pin, GPIO.HIGH)
+            return (rx[0] << 8) | rx[1]
         except Exception:
             self._cs_high()
             return None
