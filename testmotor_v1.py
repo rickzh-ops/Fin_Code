@@ -1,4 +1,6 @@
+import spidev
 import time
+import RPi.GPIO as GPIO
 from hal_plus_motordriver import Motor
 from encoder import AMT22Encoder
 from aero_logic import AeroLogic
@@ -27,7 +29,6 @@ time.sleep(1)
 print_status(elevator_motor)
 print_status(yaw_motor)
 
-
 try:
     '''
     # ==========================
@@ -44,6 +45,7 @@ try:
         elevator_motor.set_elevator_motor_speed(speed)
         time.sleep(1)
     '''
+    '''
     # ==========================
     # YAW MOTOR TEST
     # ==========================
@@ -57,6 +59,7 @@ try:
         print(f"Reverse speed: {speed}")
         yaw_motor.set_yaw_motor_speed(speed)
         time.sleep(5)
+    '''
     '''
     # ==========================
     # LIMIT SWITCH TEST
@@ -79,6 +82,14 @@ try:
     # ==========================
     # YAW TEST
     # ==========================
+    try:
+        while True:
+            raw, pos, angle = encoder.read_data()
+            print(f"raw=0x{raw:04X}, pos={pos:5d}, angle={angle:7.2f} deg")
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        encoder.spi.close()
+        GPIO.cleanup()
     '''
     print("=== YAW TEST ===")
     aero= AeroLogic()

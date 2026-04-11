@@ -1,78 +1,59 @@
 import spidev
 import time
-import RPi.GPIO as GPIO
-from hal_plus_motordriver import Motor
-
+import pigpio
 
 class AMT22Encoder:
-    AMT22_NOP = 0x00
-    AMT22_RESET = 0x60
-    AMT22_ZERO = 0x70
-
-    def __init__(self, pi_instance, cs_pin, bus=0, device=0, speed_hz=1000000):
+    """
+    AMT22 绝对值编码器类 (14位分辨率)
+    """
+    def __init__(self, pi_instance, cs_pin, bus=0, device=0, speed_hz=500000):
         self.pi = pi_instance
         self.cs_pin = cs_pin
-        GPIO.setmode(GPIO.BCM)
+        
         # 初始化 SPI
         self.spi = spidev.SpiDev()
         self.spi.open(bus, device)
-        self.spi.no_cs = True # 我们使用 pigpio 手动控制 CS
+        self.spi.no_cs = True           # 必须为 True，因为我们要手动控制 CS 引脚
         self.spi.max_speed_hz = speed_hz
-        self.spi.mode = 0
+        self.spi.mode = 0b00
         self.spi.bits_per_word = 8
-        # 确保 CS 初始为高电平
-        self._cs_high()
+        
+        # 初始化 CS 引脚
+        self.pi.set_mode(self.cs_pin, pigpio.OUTPUT)
+        self.pi.write(self.cs_pin, 1)   # 初始状态设为高电平
+        
+        time.sleep(0.1) # 等待初始化稳定
 
     def _cs_low(self):
         self.pi.write(self.cs_pin, 0)
-        time.sleep(0.000003) # 确保建立时间 (3us)
+        time.sleep(0.00001) # 10us 建立时间
 
     def _cs_high(self):
+        time.sleep(0.00001) # 10us 保持时间
         self.pi.write(self.cs_pin, 1)
-        time.sleep(0.000003) # 确保保持时间
 
-    def send_cmd(self, cmd):
+    def read_data(self):
+        """
+        读取编码器原始数据并计算角度
+        返回: (raw, pos, angle)
+        """
         try:
-            GPIO.output(self.cs_pin, GPIO.LOW)
-            time.sleep(0.00001)
+            self._cs_low()
+            # 发送两个 NOP 指令 (0x00) 来换取 16 位数据
             rx = self.spi.xfer2([0x00, 0x00])
-            time.sleep(0.00001)
-            GPIO.output(self.cs_pin, GPIO.HIGH)
-            return (rx[0] << 8) | rx[1]
-        except Exception:
             self._cs_high()
-            return None
 
-    def check_parity(self, value):
-        if value is None:
-            return False
-
-        odd = 0
-        even = 0
-
-        for i in range(0, 14, 2):
-            even ^= (value >> i) & 1
-            odd ^= (value >> (i + 1)) & 1
-
-        odd = not odd
-        even = not even
-
-        return ((value >> 15) & 1) == odd and ((value >> 14) & 1) == even
-
-    def get_raw_position(self, retries=3):
-        for i in range(retries):
-            val = self.send_cmd(self.AMT22_NOP)
-            if val is not None and self.check_parity(val):
-                return val & 0x3FFF
-        return None
-
-    def get_position(self):
-        raw = self.get_raw_position()
-        if raw is None:
-            return None
-
-        angle = (raw / 16384.0) * 360.0
-        return (angle + 180) % 360 - 180
+            raw = (rx[0] << 8) | rx[1]
+            
+            # AMT22 的高2位通常是校验位，低14位是位置
+            pos = raw & 0x3FFF  
+            angle = pos * 360.0 / 16384.0
+            
+            return raw, pos, angle
+        except Exception as e:
+            print(f"Encoder Read Error: {e}")
+            return None, None, None
 
     def close(self):
+        """释放资源"""
         self.spi.close()
