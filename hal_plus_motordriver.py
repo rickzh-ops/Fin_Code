@@ -29,8 +29,8 @@ class Motor:
             #"MOSI": 10,
             #"SCLK": 11,
             # Limit switches
-            "LIM_LOWER": 26,
-            "LIM_UPPER": 17
+            "LIM_LOWER": 17,
+            "LIM_UPPER": 26
         }
 
         self._init_pins()
@@ -46,7 +46,7 @@ class Motor:
             else:
                 self.pi.set_mode(pin, pigpio.OUTPUT)
 
-        # Default
+        # Match the working Pololu example: EN high means enabled.
         self.pi.write(self.PINS["M1_EN"], 1)
         self.pi.write(self.PINS["M2_EN"], 1)
 
@@ -55,9 +55,18 @@ class Motor:
     # =========================
     def set_elevator_motor_speed(self, m1):
         self._set_single_motor("M1", m1)
+
     def set_yaw_motor_speed(self, m2):
         self._set_single_motor("M2", m2)
+
     def _set_single_motor(self, prefix, speed):
+        enable_pin = self.PINS[f"{prefix}_EN"]
+
+        if speed == 0:
+            self.pi.hardware_PWM(self.PINS[f"{prefix}_PWM"], 20000, 0)
+            self.pi.write(enable_pin, 1)
+            return
+
         if speed < 0:
             direction = 1
             speed = -speed
@@ -67,6 +76,7 @@ class Motor:
         if speed > self.MAX_SPEED:
             speed = self.MAX_SPEED
 
+        self.pi.write(enable_pin, 1)
         self.pi.write(self.PINS[f"{prefix}_DIR"], direction)
         duty = int(speed * 6250 / 3)
         self.pi.hardware_PWM(self.PINS[f"{prefix}_PWM"], 20000, duty)
@@ -99,9 +109,9 @@ class Motor:
     # Stop
     # =========================
     def stop_all(self):
-        global _pi
-        _pi.stop()
-        _pi = pigpio.pi()
-        self.set_motor_speed(0, 0)
-        self.set_yaw(0)
+        self.set_elevator_motor_speed(0)
+        self.set_yaw_motor_speed(0)
 
+    def close(self):
+        self.stop_all()
+        self.pi.stop()

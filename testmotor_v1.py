@@ -60,28 +60,34 @@ try:
         yaw_motor.set_yaw_motor_speed(speed)
         time.sleep(5)
     '''
-    '''
+    
     # ==========================
     # LIMIT SWITCH TEST
     # ==========================
     print("=== LIMIT SWITCH TEST ===")
+    reverse_mode = False
+    current_speed = 200
+    elevator_motor.set_elevator_motor_speed(current_speed)
+    print(f"Elevator command set to {current_speed}")
     while True:
-        Lower = elevator_motor.get_lower_limit()
-        if Lower==1:
-            elevator_motor.set_elevator_motor_speed(100)
-            time.sleep(0.1)
-        else:
-            elevator_motor.set_elevator_motor_speed(100)
-            time.sleep(1)
-            break
+        Lower = elevator_motor.get_upper_limit()
+        if not reverse_mode and Lower == 0:
+            reverse_mode = True
+            current_speed = -200
+            elevator_motor.set_elevator_motor_speed(current_speed)
+            print("Lower limit pressed, reverse elevator")
+
+        print(f"Lower limit: {Lower} | elevator cmd: {current_speed}")
+        time.sleep(0.1)
     print("Stop motors")
     elevator_motor.set_elevator_motor_speed(0)
     yaw_motor.set_yaw_motor_speed(0)
     time.sleep(1)
-    '''
+    
     # ==========================
     # YAW TEST
     # ==========================
+    '''
     try:
         while True:
             raw, pos, angle = encoder.read_data()
@@ -90,7 +96,6 @@ try:
     except KeyboardInterrupt:
         encoder.spi.close()
         GPIO.cleanup()
-    '''
     print("=== YAW TEST ===")
     aero= AeroLogic()
     number= len(aero.wind_speeds)
