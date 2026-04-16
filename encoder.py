@@ -6,7 +6,7 @@ class AMT22Encoder:
     """
     AMT22 绝对值编码器类 (14位分辨率)
     """
-    def __init__(self, pi_instance, cs_pin, bus=0, device=0, speed_hz=500000):
+    def __init__(self, pi_instance, cs_pin, bus=1, device=0, speed_hz=500000):
         self.pi = pi_instance
         self.cs_pin = cs_pin
         

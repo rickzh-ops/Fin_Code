@@ -1,10 +1,12 @@
 """
-Main entry point for fin yaw control.
+Main entry point for fin yaw and elevator control.
 
-Startup menu:
+Modes:
 1. Encoder calibration mode
 2. Manual wind speed mode
-3. Sinusoidal wind tracking mode
+3. 15-second sinusoidal wind tracking mode
+4. Angle vs. settling time mode
+5. Elevator run mode
 """
 
 import math
@@ -23,6 +25,7 @@ from encoder import AMT22Encoder
 from hal_plus_motordriver import Motor
 from pid_controller import PIDController
 
+
 CONTROL_HZ = 50
 CONTROL_DT = 1.0 / CONTROL_HZ
 ENABLE_LIMIT_SWITCH_PROTECTION = False
@@ -38,13 +41,10 @@ SETTLING_TOLERANCE_DEG = 1.0
 SETTLING_HOLD_SECONDS = 0.3
 SETTLING_MOVE_TIMEOUT = 8.0
 ELEVATOR_RUN_SPEED = 100
-ELEVATOR_LIMIT_HOLD_SECONDS = 0.5
-LOWER_LIMIT_ACTIVE_STATE = 0
 LIMIT_SIGNAL_PRINT_INTERVAL = 1.0
 ELEVATOR_WIND_THRESHOLD = 30.0
 LIMIT_SWITCH_ACTIVE_STATE = 0
 ELEVATOR_HOME_TIMEOUT = 30.0
-ELEVATOR_RUN_DURATION = 1.0
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ELEVATOR_DOWN_RUNNER = os.path.join(BASE_DIR, "elevator_down_runner.py")
 ELEVATOR_UP_RUNNER = os.path.join(BASE_DIR, "elevator_up_runner.py")
@@ -63,9 +63,8 @@ class FinController:
         self.encoder_zero_offset = 0.0
         self.elevator_motion_target = None
         self.elevator_current_speed = 0
-        self.elevator_pulse_until = 0.0
         self.pid = PIDController(
-            kp=200,
+            kp=200.0,
             ki=5,
             kd=1,
             setpoint=0.0,
@@ -127,12 +126,12 @@ class FinController:
             raw, pos, angle = read_data()
             if angle is None:
                 return None
-            corrected_angle = normalize_angle(float(angle) - self.encoder_zero_offset) if apply_offset else normalize_angle(float(angle))
-            return {
-                "raw": raw,
-                "pos": pos,
-                "angle": corrected_angle,
-            }
+            corrected_angle = (
+                normalize_angle(float(angle) - self.encoder_zero_offset)
+                if apply_offset
+                else normalize_angle(float(angle))
+            )
+            return {"raw": raw, "pos": pos, "angle": corrected_angle}
 
         for method_name in ("get_position", "get_pos", "get_angle", "read_angle"):
             method = getattr(self.encoder, method_name, None)
@@ -140,12 +139,12 @@ class FinController:
                 angle = method()
                 if angle is None:
                     return None
-                corrected_angle = normalize_angle(float(angle) - self.encoder_zero_offset) if apply_offset else normalize_angle(float(angle))
-                return {
-                    "raw": None,
-                    "pos": None,
-                    "angle": corrected_angle,
-                }
+                corrected_angle = (
+                    normalize_angle(float(angle) - self.encoder_zero_offset)
+                    if apply_offset
+                    else normalize_angle(float(angle))
+                )
+                return {"raw": None, "pos": None, "angle": corrected_angle}
 
         raise AttributeError(
             "AMT22Encoder does not expose a supported angle-reading method. "
@@ -177,7 +176,8 @@ class FinController:
                     raw_text = "----" if state["raw"] is None else f"{state['raw']:04X}"
                     pos_text = "----" if state["pos"] is None else f"{state['pos']:5d}"
                     print(
-                        f"\rraw=0x{raw_text} | pos={pos_text} | angle={state['angle']:7.2f} deg   ",
+                        f"\rraw=0x{raw_text} | pos={pos_text} | "
+                        f"angle={state['angle']:7.2f} deg   ",
                         end="",
                         flush=True,
                     )
@@ -218,6 +218,14 @@ class FinController:
             return True
         return False
 
+    def get_elevator_limits(self):
+        if self.elevator_motor is None:
+            return {"lower": None, "upper": None}
+        return {
+            "lower": self.elevator_motor.get_lower_limit(),
+            "upper": self.elevator_motor.get_upper_limit(),
+        }
+
     def yaw_allowed_by_upper_limit(self):
         limits = self.get_elevator_limits()
         return limits["upper"] == LIMIT_SWITCH_ACTIVE_STATE
@@ -245,15 +253,6 @@ class FinController:
             self.elevator_motor.set_elevator_motor_speed(0)
         self.elevator_current_speed = 0
         self.elevator_motion_target = None
-        self.elevator_pulse_until = 0.0
-
-    def get_elevator_limits(self):
-        if self.elevator_motor is None:
-            return {"lower": None, "upper": None}
-        return {
-            "lower": self.elevator_motor.get_lower_limit(),
-            "upper": self.elevator_motor.get_upper_limit(),
-        }
 
     def home_elevator_to_lower_limit(self):
         print("Homing elevator to lower limit...")
@@ -267,11 +266,7 @@ class FinController:
                 print("Lower limit pressed. Elevator homing complete.")
                 return True
 
-            subprocess.run(
-                [sys.executable, ELEVATOR_DOWN_RUNNER],
-                cwd=BASE_DIR,
-                check=False,
-            )
+            subprocess.run([sys.executable, ELEVATOR_DOWN_RUNNER], cwd=BASE_DIR, check=False)
             limits = self.get_elevator_limits()
             if limits["lower"] == LIMIT_SWITCH_ACTIVE_STATE:
                 self.stop_elevator_motion()
@@ -282,8 +277,7 @@ class FinController:
             if now - last_print_time >= LIMIT_SIGNAL_PRINT_INTERVAL:
                 print(
                     "Homing elevator | "
-                    f"lower={limits['lower']} upper={limits['upper']} "
-                    f"cmd=runner_down"
+                    f"lower={limits['lower']} upper={limits['upper']} cmd=runner_down"
                 )
                 last_print_time = now
 
@@ -293,49 +287,6 @@ class FinController:
                 return False
 
             time.sleep(CONTROL_DT)
-
-    def run_elevator_pulsed_until_limit(
-        self,
-        speed,
-        motion_target,
-        stop_limit_key,
-        reached_message,
-    ):
-        limits = self.get_elevator_limits()
-        if limits[stop_limit_key] == LIMIT_SWITCH_ACTIVE_STATE:
-            if self.elevator_motion_target == motion_target or self.elevator_current_speed != 0:
-                print(reached_message)
-            self.stop_elevator_motion()
-            return False, stop_limit_key, limits
-
-        now = time.perf_counter()
-        if (
-            self.elevator_motion_target == motion_target
-            and self.elevator_current_speed == speed
-            and now < self.elevator_pulse_until
-        ):
-            return True, f"moving_{stop_limit_key}", limits
-
-        if (
-            self.elevator_motion_target == motion_target
-            and self.elevator_current_speed == speed
-            and now >= self.elevator_pulse_until
-        ):
-            self.elevator_motor.set_elevator_motor_speed(0)
-            self.elevator_current_speed = 0
-            self.elevator_pulse_until = 0.0
-            return True, f"moving_{stop_limit_key}", limits
-
-        self.elevator_motor.set_elevator_motor_speed(speed)
-        self.elevator_current_speed = speed
-        self.elevator_motion_target = motion_target
-        self.elevator_pulse_until = now + ELEVATOR_RUN_DURATION
-        direction_text = "forward" if speed > 0 else "reverse"
-        print(
-            f"Elevator pulse started at {speed} ({direction_text}) for up to "
-            f"{ELEVATOR_RUN_DURATION:.1f}s toward {stop_limit_key} limit."
-        )
-        return True, f"moving_{stop_limit_key}", limits
 
     def run_elevator_runner_until_limit(
         self,
@@ -686,28 +637,22 @@ class FinController:
 
     def run_elevator_until_pause_or_lower_limit(self):
         print("=== ELEVATOR RUN MODE ===")
-        print("Elevator motor starts at speed 100.")
+        print("Elevator starts at speed +100.")
+        print("When lower limit is pressed, it reverses to -100.")
         print("Press Enter, Space, or q to stop.")
-        print("After the lower limit switch is pressed (1 -> 0), motor speed changes to -100 and stays there.")
 
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         last_print_time = 0.0
-
-        print(
-            "Lower limit signal and elevator command will be printed every 1 second "
-            "until you exit this mode."
-        )
+        reverse_mode = False
+        seen_unpressed_state = False
 
         try:
             tty.setcbreak(fd)
-            reverse_mode = False
-            seen_unpressed_state = False
-
             while True:
                 lower_limit = self.elevator_motor.get_lower_limit()
+                upper_limit = self.elevator_motor.get_upper_limit()
 
-                # Track that we have seen the switch in its idle/unpressed state.
                 if lower_limit == 1:
                     seen_unpressed_state = True
 
@@ -715,27 +660,16 @@ class FinController:
                     reverse_mode = True
                     print("\nLower limit pressed. Reversing elevator to -100.")
 
-                if reverse_mode:
-                    moving, _, _ = self.run_elevator_pulsed_until_limit(
-                        speed=-ELEVATOR_RUN_SPEED,
-                        motion_target="mode5_upper",
-                        stop_limit_key="upper",
-                        reached_message="Upper limit pressed. Elevator pulse run stopped.",
-                    )
-                    current_speed = self.elevator_current_speed
-                else:
-                    self.run_elevator_pulsed_until_limit(
-                        speed=ELEVATOR_RUN_SPEED,
-                        motion_target="mode5_lower",
-                        stop_limit_key="lower",
-                        reached_message="Lower limit pressed. Reversing elevator to -100.",
-                    )
-                    current_speed = self.elevator_current_speed
+                current_speed = -ELEVATOR_RUN_SPEED if reverse_mode else ELEVATOR_RUN_SPEED
+                self.elevator_motor.set_elevator_motor_speed(current_speed)
+                self.elevator_current_speed = current_speed
 
                 now = time.perf_counter()
                 if now - last_print_time >= LIMIT_SIGNAL_PRINT_INTERVAL:
                     print(
-                        f"Lower limit signal: {lower_limit} | elevator cmd: {current_speed}"
+                        f"Lower limit signal: {lower_limit} | "
+                        f"Upper limit signal: {upper_limit} | "
+                        f"elevator cmd: {current_speed}"
                     )
                     last_print_time = now
 

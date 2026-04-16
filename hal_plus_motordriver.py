@@ -48,7 +48,7 @@ class Motor:
             else:
                 self.pi.set_mode(pin, pigpio.OUTPUT)
 
-        # Match the working Pololu example: EN high means enabled.
+        # Match the working motor-driver example: EN high means enabled.
         self.pi.write(self.PINS["M1_EN"], 1)
         self.pi.write(self.PINS["M2_EN"], 1)
 

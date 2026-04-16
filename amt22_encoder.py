@@ -17,7 +17,7 @@ DELAY = 0.000003
 spi = spidev.SpiDev()
 
 #initialize
-def encoder_init(bus=0, device=0):
+def encoder_init(bus=1, device=0):
     spi.open(bus, device)
     spi.max_speed_hz = 1000000
     spi.mode = 0
