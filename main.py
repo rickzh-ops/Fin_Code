@@ -10,6 +10,7 @@ Startup menu:
 import math
 import os
 import select
+import subprocess
 import sys
 import termios
 import threading
@@ -36,13 +37,17 @@ SETTLING_TEST_STEP = 1
 SETTLING_TOLERANCE_DEG = 1.0
 SETTLING_HOLD_SECONDS = 0.3
 SETTLING_MOVE_TIMEOUT = 8.0
-ELEVATOR_RUN_SPEED = -200
+ELEVATOR_RUN_SPEED = 100
 ELEVATOR_LIMIT_HOLD_SECONDS = 0.5
 LOWER_LIMIT_ACTIVE_STATE = 0
 LIMIT_SIGNAL_PRINT_INTERVAL = 1.0
-ELEVATOR_WIND_THRESHOLD = 40.0
+ELEVATOR_WIND_THRESHOLD = 30.0
 LIMIT_SWITCH_ACTIVE_STATE = 0
-ELEVATOR_HOME_TIMEOUT = 12.0
+ELEVATOR_HOME_TIMEOUT = 30.0
+ELEVATOR_RUN_DURATION = 1.0
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ELEVATOR_DOWN_RUNNER = os.path.join(BASE_DIR, "elevator_down_runner.py")
+ELEVATOR_UP_RUNNER = os.path.join(BASE_DIR, "elevator_up_runner.py")
 
 
 def normalize_angle(angle):
@@ -58,12 +63,13 @@ class FinController:
         self.encoder_zero_offset = 0.0
         self.elevator_motion_target = None
         self.elevator_current_speed = 0
+        self.elevator_pulse_until = 0.0
         self.pid = PIDController(
-            kp=200.0,
+            kp=200,
             ki=5,
             kd=1,
             setpoint=0.0,
-            output_limits=(-550, 550),
+            output_limits=(-480, 480),
             deadzone=1.0,
         )
 
@@ -147,6 +153,10 @@ class FinController:
         )
 
     def jog_encoder_alignment(self, speed):
+        if not self.yaw_allowed_by_upper_limit():
+            self.yaw_motor.set_yaw_motor_speed(0)
+            print("\nUpper limit switch is not pressed. Yaw motor remains stopped.")
+            return
         self.yaw_motor.set_yaw_motor_speed(speed)
         time.sleep(ENCODER_JOG_DURATION)
         self.yaw_motor.set_yaw_motor_speed(0)
@@ -208,8 +218,17 @@ class FinController:
             return True
         return False
 
+    def yaw_allowed_by_upper_limit(self):
+        limits = self.get_elevator_limits()
+        return limits["upper"] == LIMIT_SWITCH_ACTIVE_STATE
+
     def apply_yaw_output(self, output):
         if self.yaw_motor is None:
+            return 0
+
+        if not self.yaw_allowed_by_upper_limit():
+            self.yaw_motor.set_yaw_motor_speed(0)
+            self.pid.reset()
             return 0
 
         if self.limit_reached_for_output(output):
@@ -226,6 +245,7 @@ class FinController:
             self.elevator_motor.set_elevator_motor_speed(0)
         self.elevator_current_speed = 0
         self.elevator_motion_target = None
+        self.elevator_pulse_until = 0.0
 
     def get_elevator_limits(self):
         if self.elevator_motor is None:
@@ -247,16 +267,23 @@ class FinController:
                 print("Lower limit pressed. Elevator homing complete.")
                 return True
 
-            self.elevator_motor.set_elevator_motor_speed(-ELEVATOR_RUN_SPEED)
-            self.elevator_current_speed = -ELEVATOR_RUN_SPEED
-            self.elevator_motion_target = "lower"
+            subprocess.run(
+                [sys.executable, ELEVATOR_DOWN_RUNNER],
+                cwd=BASE_DIR,
+                check=False,
+            )
+            limits = self.get_elevator_limits()
+            if limits["lower"] == LIMIT_SWITCH_ACTIVE_STATE:
+                self.stop_elevator_motion()
+                print("Lower limit pressed. Elevator homing complete.")
+                return True
 
             now = time.perf_counter()
             if now - last_print_time >= LIMIT_SIGNAL_PRINT_INTERVAL:
                 print(
                     "Homing elevator | "
                     f"lower={limits['lower']} upper={limits['upper']} "
-                    f"cmd={self.elevator_current_speed}"
+                    f"cmd=runner_down"
                 )
                 last_print_time = now
 
@@ -267,42 +294,94 @@ class FinController:
 
             time.sleep(CONTROL_DT)
 
-    def start_elevator_motion(self, target_mode):
-        if self.elevator_motor is None:
-            return
+    def run_elevator_pulsed_until_limit(
+        self,
+        speed,
+        motion_target,
+        stop_limit_key,
+        reached_message,
+    ):
+        limits = self.get_elevator_limits()
+        if limits[stop_limit_key] == LIMIT_SWITCH_ACTIVE_STATE:
+            if self.elevator_motion_target == motion_target or self.elevator_current_speed != 0:
+                print(reached_message)
+            self.stop_elevator_motion()
+            return False, stop_limit_key, limits
 
-        speed = ELEVATOR_RUN_SPEED if target_mode == "upper" else -ELEVATOR_RUN_SPEED
-        if self.elevator_current_speed != speed:
-            self.elevator_motor.set_elevator_motor_speed(speed)
-            direction_text = "forward" if speed > 0 else "reverse"
-            print(
-                f"Elevator command set to {speed} ({direction_text}) for {target_mode} wind mode."
-            )
+        now = time.perf_counter()
+        if (
+            self.elevator_motion_target == motion_target
+            and self.elevator_current_speed == speed
+            and now < self.elevator_pulse_until
+        ):
+            return True, f"moving_{stop_limit_key}", limits
+
+        if (
+            self.elevator_motion_target == motion_target
+            and self.elevator_current_speed == speed
+            and now >= self.elevator_pulse_until
+        ):
+            self.elevator_motor.set_elevator_motor_speed(0)
+            self.elevator_current_speed = 0
+            self.elevator_pulse_until = 0.0
+            return True, f"moving_{stop_limit_key}", limits
+
+        self.elevator_motor.set_elevator_motor_speed(speed)
         self.elevator_current_speed = speed
-        self.elevator_motion_target = target_mode
+        self.elevator_motion_target = motion_target
+        self.elevator_pulse_until = now + ELEVATOR_RUN_DURATION
+        direction_text = "forward" if speed > 0 else "reverse"
+        print(
+            f"Elevator pulse started at {speed} ({direction_text}) for up to "
+            f"{ELEVATOR_RUN_DURATION:.1f}s toward {stop_limit_key} limit."
+        )
+        return True, f"moving_{stop_limit_key}", limits
+
+    def run_elevator_runner_until_limit(
+        self,
+        script_path,
+        speed,
+        motion_target,
+        stop_limit_key,
+        reached_message,
+        moving_state,
+    ):
+        limits = self.get_elevator_limits()
+        if limits[stop_limit_key] == LIMIT_SWITCH_ACTIVE_STATE:
+            if self.elevator_motion_target == motion_target or self.elevator_current_speed != 0:
+                print(reached_message)
+            self.stop_elevator_motion()
+            return False, stop_limit_key, limits
+
+        self.elevator_motion_target = motion_target
+        self.elevator_current_speed = speed
+        subprocess.run([sys.executable, script_path], cwd=BASE_DIR, check=False)
+        limits = self.get_elevator_limits()
+        if limits[stop_limit_key] == LIMIT_SWITCH_ACTIVE_STATE:
+            print(reached_message)
+            self.stop_elevator_motion()
+            return False, stop_limit_key, limits
+        return True, moving_state, limits
 
     def update_elevator_for_wind(self, wind_speed):
-        desired_mode = "upper" if wind_speed < ELEVATOR_WIND_THRESHOLD else "lower"
-        limits = self.get_elevator_limits()
-        at_lower = limits["lower"] == LIMIT_SWITCH_ACTIVE_STATE
-        at_upper = limits["upper"] == LIMIT_SWITCH_ACTIVE_STATE
+        if abs(wind_speed) <= ELEVATOR_WIND_THRESHOLD:
+            return self.run_elevator_runner_until_limit(
+                script_path=ELEVATOR_UP_RUNNER,
+                speed=-ELEVATOR_RUN_SPEED,
+                motion_target="upper_runner",
+                stop_limit_key="upper",
+                reached_message="Elevator reached upper limit.",
+                moving_state="moving_upper",
+            )
 
-        if desired_mode == "upper" and at_upper:
-            if self.elevator_motion_target == "upper":
-                print("Elevator reached upper limit.")
-            self.stop_elevator_motion()
-            return False, "upper", limits
-
-        if desired_mode == "lower" and at_lower:
-            if self.elevator_motion_target == "lower":
-                print("Elevator reached lower limit.")
-            self.stop_elevator_motion()
-            return False, "lower", limits
-
-        if self.elevator_motion_target != desired_mode or self.elevator_current_speed == 0:
-            self.start_elevator_motion(desired_mode)
-
-        return True, f"moving_{desired_mode}", limits
+        return self.run_elevator_runner_until_limit(
+            script_path=ELEVATOR_DOWN_RUNNER,
+            speed=ELEVATOR_RUN_SPEED,
+            motion_target="lower_runner",
+            stop_limit_key="lower",
+            reached_message="Elevator reached lower limit.",
+            moving_state="moving_lower",
+        )
 
     def control_step_for_wind(self, wind_speed):
         target_angle = self.aero.get_target_angle(wind_speed)
@@ -624,9 +703,6 @@ class FinController:
             tty.setcbreak(fd)
             reverse_mode = False
             seen_unpressed_state = False
-            current_speed = ELEVATOR_RUN_SPEED
-            self.elevator_motor.set_elevator_motor_speed(current_speed)
-            print(f"Elevator command set to {current_speed}")
 
             while True:
                 lower_limit = self.elevator_motor.get_lower_limit()
@@ -637,9 +713,24 @@ class FinController:
 
                 if not reverse_mode and seen_unpressed_state and lower_limit == 0:
                     reverse_mode = True
-                    current_speed = -ELEVATOR_RUN_SPEED
-                    self.elevator_motor.set_elevator_motor_speed(current_speed)
                     print("\nLower limit pressed. Reversing elevator to -100.")
+
+                if reverse_mode:
+                    moving, _, _ = self.run_elevator_pulsed_until_limit(
+                        speed=-ELEVATOR_RUN_SPEED,
+                        motion_target="mode5_upper",
+                        stop_limit_key="upper",
+                        reached_message="Upper limit pressed. Elevator pulse run stopped.",
+                    )
+                    current_speed = self.elevator_current_speed
+                else:
+                    self.run_elevator_pulsed_until_limit(
+                        speed=ELEVATOR_RUN_SPEED,
+                        motion_target="mode5_lower",
+                        stop_limit_key="lower",
+                        reached_message="Lower limit pressed. Reversing elevator to -100.",
+                    )
+                    current_speed = self.elevator_current_speed
 
                 now = time.perf_counter()
                 if now - last_print_time >= LIMIT_SIGNAL_PRINT_INTERVAL:
@@ -656,7 +747,7 @@ class FinController:
                         break
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            self.elevator_motor.set_elevator_motor_speed(0)
+            self.stop_elevator_motion()
 
     def choose_mode(self):
         print("\n=== MODE MENU ===")
@@ -665,21 +756,6 @@ class FinController:
         print("3: 15-second sinusoidal wind tracking mode")
         print("4: Angle vs. settling time mode")
         print("5: Run elevator motor until pause or lower limit")
-        print("q: Quit")
-        return input("Select mode: ").strip().lower()
-
-    def run(self):
-        self.initialize_hardware()
-        try:
-            while True:
-                selection = self.choose_mode()
-
-                if selection == "1":
-                    self.calibrate_encoder_zero()
-                elif selection == "2":
-                    self.run_manual_mode()
-                elif selection == "3":
-                    selnt("5: Run elevator motor until pause or lower limit")
         print("q: Quit")
         return input("Select mode: ").strip().lower()
 

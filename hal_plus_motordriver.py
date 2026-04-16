@@ -40,6 +40,8 @@ class Motor:
     # =========================
     def _init_pins(self):
         for name, pin in self.PINS.items():
+            if name == "CS":
+                continue
             if "LIM" in name:
                 self.pi.set_mode(pin, pigpio.INPUT)
                 self.pi.set_pull_up_down(pin, pigpio.PUD_DOWN)
